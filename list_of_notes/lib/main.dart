@@ -1,4 +1,10 @@
 import 'package:flutter/material.dart';
+import 'data/idea_service.dart';
+import 'data/note_repository.dart';
+import 'models/note.dart';
+
+final NoteRepository noteRepository = SharedPrefsNoteRepository();
+final IdeaService ideaService = IdeaService();
 
 void main() {
   runApp(const MainApp());
@@ -18,16 +24,6 @@ class MainApp extends StatelessWidget {
       home: const MainShell(),
     );
   }
-}
-
-class Note {
-  final String title;
-  final String text;
-
-  const Note({
-    required this.title,
-    required this.text,
-  });
 }
 
 class MainShell extends StatefulWidget {
@@ -79,36 +75,51 @@ class NotesListScreen extends StatefulWidget {
 }
 
 class _NotesListScreenState extends State<NotesListScreen> {
-  final List<Note> _notes = [
-    const Note(
-      title: 'Купить продукты',
-      text: 'Молоко, хлеб, яйца...',
-    ),
-    const Note(
-      title: 'Подготовка к экзамену',
-      text: 'Повторить Flutter.',
-    ),
-  ];
+  List<Note> _notes = [];
+  bool _isLoading = true;
+  String? _errorText;
+
+  @override
+  void initState() {
+    super.initState();
+    _loadNotes();
+  }
+
+  Future<void> _loadNotes() async {
+    try {
+      final notes = await noteRepository.loadNotes();
+      setState(() {
+        _notes = notes;
+        _isLoading = false;
+      });
+    } catch (e) {
+      setState(() {
+        _isLoading = false;
+        _errorText = 'Не удалось загрузить заметки';
+      });
+    }
+  }
 
   Future<void> _openNewNote() async {
-    final result = await Navigator.push<Note>(
+    final result = await Navigator.push<NoteEditResult>(
       context,
       MaterialPageRoute(
         builder: (context) => const EditNoteScreen(),
       ),
     );
 
-    if (result != null) {
+    if (result != null && !result.deleted && result.note != null) {
       setState(() {
-        _notes.add(result);
+        _notes.add(result.note!);
       });
+      await noteRepository.saveNotes(_notes);
     }
   }
 
   Future<void> _editNote(int index) async {
     final note = _notes[index];
 
-    final result = await Navigator.push<Note>(
+    final result = await Navigator.push<NoteEditResult>(
       context,
       MaterialPageRoute(
         builder: (context) => EditNoteScreen(initialNote: note),
@@ -116,9 +127,16 @@ class _NotesListScreenState extends State<NotesListScreen> {
     );
 
     if (result != null) {
-      setState(() {
-        _notes[index] = result;
-      });
+      if (result.deleted) {
+        setState(() {
+          _notes.removeAt(index);
+        });
+      } else if (result.note != null) {
+        setState(() {
+          _notes[index] = result.note!;
+        });
+      }
+      await noteRepository.saveNotes(_notes);
     }
   }
 
@@ -147,31 +165,49 @@ class _NotesListScreenState extends State<NotesListScreen> {
             ),
             const SizedBox(height: 16),
             Expanded(
-              child: _notes.isEmpty
-                  ? const Center(
+              child: Builder(
+                builder: (context) {
+                  if (_isLoading) {
+                    return const Center(
+                      child: CircularProgressIndicator(),
+                    );
+                  }
+
+                  if (_errorText != null) {
+                    return Center(
+                      child: Text(_errorText!),
+                    );
+                  }
+
+                  if (_notes.isEmpty) {
+                    return const Center(
                       child: Text('Пока нет ни одной заметки.'),
-                    )
-                  : ListView.separated(
-                      itemCount: _notes.length,
-                      separatorBuilder: (context, index) =>
-                          const SizedBox(height: 8),
-                      itemBuilder: (context, index) {
-                        final note = _notes[index];
-                        return Card(
-                          child: ListTile(
-                            title: Text(
-                              note.title.isEmpty ? 'Без заголовка' : note.title,
-                            ),
-                            subtitle: Text(
-                              note.text,
-                              maxLines: 2,
-                              overflow: TextOverflow.ellipsis,
-                            ),
-                            onTap: () => _editNote(index),
+                    );
+                  }
+
+                  return ListView.separated(
+                    itemCount: _notes.length,
+                    separatorBuilder: (context, index) =>
+                        const SizedBox(height: 8),
+                    itemBuilder: (context, index) {
+                      final note = _notes[index];
+                      return Card(
+                        child: ListTile(
+                          title: Text(
+                            note.title.isEmpty ? 'Без заголовка' : note.title,
                           ),
-                        );
-                      },
-                    ),
+                          subtitle: Text(
+                            note.text,
+                            maxLines: 2,
+                            overflow: TextOverflow.ellipsis,
+                          ),
+                          onTap: () => _editNote(index),
+                        ),
+                      );
+                    },
+                  );
+                },
+              ),
             ),
           ],
         ),
@@ -218,6 +254,16 @@ class InfoScreen extends StatelessWidget {
   }
 }
 
+class NoteEditResult {
+  final Note? note;
+  final bool deleted;
+
+  const NoteEditResult({
+    this.note,
+    required this.deleted,
+  });
+}
+
 class EditNoteScreen extends StatefulWidget {
   final Note? initialNote;
 
@@ -259,22 +305,72 @@ class _EditNoteScreenState extends State<EditNoteScreen> {
     }
 
     final note = Note(title: title, text: text);
-    Navigator.pop(context, note);
-  }
-
-  void _showDeleteInfo() {
-    ScaffoldMessenger.of(context).showSnackBar(
-      const SnackBar(
-        content: Text('Удаление будет потом.'),
+    Navigator.pop(
+      context,
+      NoteEditResult(
+        note: note,
+        deleted: false,
       ),
     );
   }
 
+  Future<void> _deleteNote() async {
+    final isConfirmed = await showDialog<bool>(
+          context: context,
+          builder: (context) {
+            return AlertDialog(
+              title: const Text('Удалить заметку?'),
+              content: const Text('Это действие нельзя будет отменить.'),
+              actions: [
+                TextButton(
+                  onPressed: () => Navigator.pop(context, false),
+                  child: const Text('Отмена'),
+                ),
+                TextButton(
+                  onPressed: () => Navigator.pop(context, true),
+                  child: const Text('Удалить'),
+                ),
+              ],
+            );
+          },
+        ) ??
+        false;
+
+    if (!isConfirmed) {
+      return;
+    }
+
+    Navigator.pop(
+      context,
+      const NoteEditResult(
+        note: null,
+        deleted: true,
+      ),
+    );
+  }
+
+  Future<void> _handleIdeaRequest() async {
+    try {
+      final idea = await ideaService.fetchRandomIdea();
+      setState(() {
+        _textController.text = idea;
+      });
+    } catch (e) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Не удалось получить идею'),
+        ),
+      );
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
+    final isEditing = widget.initialNote != null;
+
     return Scaffold(
       appBar: AppBar(
-        title: const Text('Новая заметка'),
+        title: Text(isEditing ? 'Редактирование заметки' : 'Новая заметка'),
         centerTitle: true,
       ),
       body: SingleChildScrollView(
@@ -314,15 +410,7 @@ class _EditNoteScreenState extends State<EditNoteScreen> {
               children: [
                 Expanded(
                   child: OutlinedButton(
-                    onPressed: () {
-                      ScaffoldMessenger.of(context).showSnackBar(
-                        const SnackBar(
-                          content: Text(
-                            'Запрос к публичному API.',
-                          ),
-                        ),
-                      );
-                    },
+                    onPressed: _handleIdeaRequest,
                     child: const Text('Случайная идея'),
                   ),
                 ),
@@ -344,7 +432,7 @@ class _EditNoteScreenState extends State<EditNoteScreen> {
                       backgroundColor: Colors.redAccent,
                       foregroundColor: Colors.white,
                     ),
-                    onPressed: _showDeleteInfo,
+                    onPressed: _deleteNote,
                     child: const Text('Удалить'),
                   ),
                 ),
