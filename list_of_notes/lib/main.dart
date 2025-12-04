@@ -15,13 +15,112 @@ class MainApp extends StatelessWidget {
         colorScheme: ColorScheme.fromSeed(seedColor: Colors.deepPurple),
         useMaterial3: true,
       ),
-      home: const EditNoteScreen(),
+      home: const MainShell(),
     );
   }
 }
 
-class NotesListScreen extends StatelessWidget {
+class Note {
+  final String title;
+  final String text;
+
+  const Note({
+    required this.title,
+    required this.text,
+  });
+}
+
+class MainShell extends StatefulWidget {
+  const MainShell({super.key});
+
+  @override
+  State<MainShell> createState() => _MainShellState();
+}
+
+class _MainShellState extends State<MainShell> {
+  int _currentIndex = 0;
+
+  @override
+  Widget build(BuildContext context) {
+    final screens = [
+      const NotesListScreen(),
+      const InfoScreen(),
+    ];
+
+    return Scaffold(
+      body: screens[_currentIndex],
+      bottomNavigationBar: BottomNavigationBar(
+        currentIndex: _currentIndex,
+        onTap: (index) {
+          setState(() {
+            _currentIndex = index;
+          });
+        },
+        items: const [
+          BottomNavigationBarItem(
+            icon: Icon(Icons.notes),
+            label: 'Заметки',
+          ),
+          BottomNavigationBarItem(
+            icon: Icon(Icons.info_outline),
+            label: 'О приложении',
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class NotesListScreen extends StatefulWidget {
   const NotesListScreen({super.key});
+
+  @override
+  State<NotesListScreen> createState() => _NotesListScreenState();
+}
+
+class _NotesListScreenState extends State<NotesListScreen> {
+  final List<Note> _notes = [
+    const Note(
+      title: 'Купить продукты',
+      text: 'Молоко, хлеб, яйца...',
+    ),
+    const Note(
+      title: 'Подготовка к экзамену',
+      text: 'Повторить Flutter.',
+    ),
+  ];
+
+  Future<void> _openNewNote() async {
+    final result = await Navigator.push<Note>(
+      context,
+      MaterialPageRoute(
+        builder: (context) => const EditNoteScreen(),
+      ),
+    );
+
+    if (result != null) {
+      setState(() {
+        _notes.add(result);
+      });
+    }
+  }
+
+  Future<void> _editNote(int index) async {
+    final note = _notes[index];
+
+    final result = await Navigator.push<Note>(
+      context,
+      MaterialPageRoute(
+        builder: (context) => EditNoteScreen(initialNote: note),
+      ),
+    );
+
+    if (result != null) {
+      setState(() {
+        _notes[index] = result;
+      });
+    }
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -38,44 +137,47 @@ class NotesListScreen extends StatelessWidget {
             const Text(
               'Список заметок',
               style: TextStyle(
-                fontSize: 20,
-                fontWeight: FontWeight.bold,
+                fontSize: 22,
+                fontWeight: FontWeight.w700,
               ),
             ),
             const SizedBox(height: 12),
             const Text(
-              'Ниже — примеры заметок. Позже здесь будет динамический список.',
+              'Здесь отображаются все заметки текущего сеанса. ',
             ),
             const SizedBox(height: 16),
             Expanded(
-              child: ListView(
-                children: const [
-                  Card(
-                    child: ListTile(
-                      title: Text('Купить продукты'),
-                      subtitle: Text('Молоко, хлеб, яйца...'),
+              child: _notes.isEmpty
+                  ? const Center(
+                      child: Text('Пока нет ни одной заметки.'),
+                    )
+                  : ListView.separated(
+                      itemCount: _notes.length,
+                      separatorBuilder: (context, index) =>
+                          const SizedBox(height: 8),
+                      itemBuilder: (context, index) {
+                        final note = _notes[index];
+                        return Card(
+                          child: ListTile(
+                            title: Text(
+                              note.title.isEmpty ? 'Без заголовка' : note.title,
+                            ),
+                            subtitle: Text(
+                              note.text,
+                              maxLines: 2,
+                              overflow: TextOverflow.ellipsis,
+                            ),
+                            onTap: () => _editNote(index),
+                          ),
+                        );
+                      },
                     ),
-                  ),
-                  Card(
-                    child: ListTile(
-                      title: Text('Подготовка к экзамену'),
-                      subtitle: Text('Повторить конспекты по Flutter.'),
-                    ),
-                  ),
-                  Card(
-                    child: ListTile(
-                      title: Text('Идея для проекта'),
-                      subtitle: Text('Приложение со списком заметок.'),
-                    ),
-                  ),
-                ],
-              ),
             ),
           ],
         ),
       ),
       floatingActionButton: FloatingActionButton(
-        onPressed: null,
+        onPressed: _openNewNote,
         tooltip: 'Добавить заметку',
         child: const Icon(Icons.add),
       ),
@@ -83,8 +185,90 @@ class NotesListScreen extends StatelessWidget {
   }
 }
 
-class EditNoteScreen extends StatelessWidget {
-  const EditNoteScreen({super.key});
+class InfoScreen extends StatelessWidget {
+  const InfoScreen({super.key});
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      appBar: AppBar(
+        title: const Text('О приложении'),
+        centerTitle: true,
+      ),
+      body: const Padding(
+        padding: EdgeInsets.all(16),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(
+              'Список заметок',
+              style: TextStyle(
+                fontSize: 22,
+                fontWeight: FontWeight.w700,
+              ),
+            ),
+            SizedBox(height: 12),
+            Text(
+              'Приложение для создания и просмотра заметок.',
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class EditNoteScreen extends StatefulWidget {
+  final Note? initialNote;
+
+  const EditNoteScreen({super.key, this.initialNote});
+
+  @override
+  State<EditNoteScreen> createState() => _EditNoteScreenState();
+}
+
+class _EditNoteScreenState extends State<EditNoteScreen> {
+  late final TextEditingController _titleController;
+  late final TextEditingController _textController;
+
+  @override
+  void initState() {
+    super.initState();
+    _titleController =
+        TextEditingController(text: widget.initialNote?.title ?? '');
+    _textController =
+        TextEditingController(text: widget.initialNote?.text ?? '');
+  }
+
+  @override
+  void dispose() {
+    _titleController.dispose();
+    _textController.dispose();
+    super.dispose();
+  }
+
+  void _saveNote() {
+    final title = _titleController.text.trim();
+    final text = _textController.text.trim();
+
+    if (text.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Текст заметки не может быть пустым')),
+      );
+      return;
+    }
+
+    final note = Note(title: title, text: text);
+    Navigator.pop(context, note);
+  }
+
+  void _showDeleteInfo() {
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(
+        content: Text('Удаление будет потом.'),
+      ),
+    );
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -103,9 +287,10 @@ class EditNoteScreen extends StatelessWidget {
               style: TextStyle(fontWeight: FontWeight.w600),
             ),
             const SizedBox(height: 8),
-            const TextField(
-              decoration: InputDecoration(
-                hintText: 'Например, «Список дел на завтра»',
+            TextField(
+              controller: _titleController,
+              decoration: const InputDecoration(
+                hintText: 'Например, "Список дел на завтра"',
                 border: OutlineInputBorder(),
               ),
             ),
@@ -115,9 +300,10 @@ class EditNoteScreen extends StatelessWidget {
               style: TextStyle(fontWeight: FontWeight.w600),
             ),
             const SizedBox(height: 8),
-            const TextField(
+            TextField(
+              controller: _textController,
               maxLines: 8,
-              decoration: InputDecoration(
+              decoration: const InputDecoration(
                 hintText: 'Введите текст заметки...',
                 border: OutlineInputBorder(),
                 alignLabelWithHint: true,
@@ -128,7 +314,15 @@ class EditNoteScreen extends StatelessWidget {
               children: [
                 Expanded(
                   child: OutlinedButton(
-                    onPressed: null,
+                    onPressed: () {
+                      ScaffoldMessenger.of(context).showSnackBar(
+                        const SnackBar(
+                          content: Text(
+                            'Запрос к публичному API.',
+                          ),
+                        ),
+                      );
+                    },
                     child: const Text('Случайная идея'),
                   ),
                 ),
@@ -139,7 +333,7 @@ class EditNoteScreen extends StatelessWidget {
               children: [
                 Expanded(
                   child: ElevatedButton(
-                    onPressed: null,
+                    onPressed: _saveNote,
                     child: const Text('Сохранить'),
                   ),
                 ),
@@ -150,7 +344,7 @@ class EditNoteScreen extends StatelessWidget {
                       backgroundColor: Colors.redAccent,
                       foregroundColor: Colors.white,
                     ),
-                    onPressed: null,
+                    onPressed: _showDeleteInfo,
                     child: const Text('Удалить'),
                   ),
                 ),
